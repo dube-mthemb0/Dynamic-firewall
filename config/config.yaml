@@ -1,0 +1,178 @@
+# System Configuration
+system:
+  debug: true
+  log_level: "INFO"
+  max_workers: 4
+  
+# Network Configuration
+network:
+  interface: "eth0"  # Network interface to monitor
+  capture_filter: ""  # BPF filter for packet capture
+  max_packet_size: 65535
+  timeout: 1.0
+  
+# Packet Capture Settings
+packet_capture:
+  batch_size: 1000
+  buffer_size: 100000
+  real_time: true
+  save_pcap: false
+  pcap_rotation: 100  # MB before rotation
+
+# Feature Extraction
+features:
+  # Network layer features
+  extract_ip: true
+  extract_ports: true
+  extract_protocol: true
+  extract_flags: true
+  extract_packet_size: true
+  
+  # Flow-based features  
+  flow_timeout: 300  # seconds
+  extract_flow_duration: true
+  extract_bytes_transferred: true
+  extract_packet_count: true
+  
+  # Statistical features
+  extract_packet_rate: true
+  extract_byte_rate: true
+  window_size: 10  # packets for rate calculation
+
+# Reinforcement Learning Configuration
+rl_agent:
+  algorithm: "DQN"  # DQN, PPO, A3C
+  
+  # Environment settings
+  state_size: 20  # Number of features
+  action_space: 4  # ALLOW, DROP, LOG, QUARANTINE
+  
+  # Training parameters
+  learning_rate: 0.0003
+  gamma: 0.99
+  epsilon_start: 1.0
+  epsilon_end: 0.01
+  epsilon_decay: 0.995
+  
+  # DQN specific
+  replay_buffer_size: 100000
+  batch_size: 32
+  target_update_freq: 1000
+  
+  # PPO specific (if used)
+  n_steps: 2048
+  n_epochs: 10
+  clip_range: 0.2
+  
+  # Training schedule
+  total_timesteps: 1000000
+  eval_freq: 10000
+  save_freq: 50000
+
+# Reward Function
+rewards:
+  correct_allow: 1.0
+  correct_block: 1.0
+  false_positive: -2.0  # Blocking benign traffic
+  false_negative: -5.0  # Allowing malicious traffic
+  unknown_penalty: -0.1
+  
+  # Additional penalties
+  critical_service_block: -10.0  # Blocking critical services
+  high_priority_allow: 2.0       # Correctly allowing high priority
+
+# Policy Engine Configuration
+policy_engine:
+  backend: "iptables"  # iptables, custom, or simulated
+  
+  # Rule management
+  max_rules: 1000
+  rule_timeout: 3600  # seconds before rule expires
+  enable_rollback: true
+  rollback_threshold: 0.7  # Performance threshold for rollback
+  
+  # Safety constraints
+  whitelist_ips: ["127.0.0.1", "192.168.1.1"]
+  critical_ports: [22, 80, 443, 53]
+  never_block_internal: true
+
+# Dashboard Configuration  
+dashboard:
+  host: "127.0.0.1"
+  port: 8050
+  debug: false
+  
+  # Refresh rates (seconds)
+  metrics_refresh: 5
+  traffic_refresh: 1
+  policy_refresh: 10
+  
+  # Data retention
+  max_plot_points: 1000
+  history_retention: 24  # hours
+
+# Data Sources
+data:
+  # Training datasets
+  cicids2017_path: "data/cicids2017/"
+  unsw_nb15_path: "data/unsw_nb15/"
+  custom_dataset_path: "data/custom/"
+  
+  # Real-time data storage
+  packet_log_path: "logs/packets/"
+  decision_log_path: "logs/decisions/"
+  performance_log_path: "logs/performance/"
+  
+  # Data preprocessing
+  normalize_features: true
+  handle_missing: "mean"  # mean, median, drop
+  test_split: 0.2
+
+# Evaluation Configuration
+evaluation:
+  # Metrics to track
+  track_accuracy: true
+  track_precision: true
+  track_recall: true
+  track_f1: true
+  track_latency: true
+  
+  # Comparison baselines
+  compare_snort: true
+  compare_suricata: true
+  compare_static_rules: true
+  
+  # Testing scenarios
+  benign_traffic_ratio: 0.8
+  attack_types: ["port_scan", "ddos", "brute_force", "malware"]
+  
+  # Performance thresholds
+  min_accuracy: 0.90
+  max_latency: 50  # milliseconds
+  max_false_positive_rate: 0.05
+
+# Logging Configuration
+logging:
+  level: "INFO"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  
+  # Log files
+  main_log: "logs/main.log"
+  packet_log: "logs/packets.log" 
+  rl_log: "logs/rl_training.log"
+  policy_log: "logs/policy_changes.log"
+  
+  # Log rotation
+  max_size: "10MB"
+  backup_count: 5
+
+# Security Settings
+security:
+  require_authentication: true
+  api_key: "your-secret-key-here"
+  rate_limiting: true
+  max_requests_per_minute: 100
+  
+  # Encryption for sensitive data
+  encrypt_logs: false
+  encryption_key_path: "config/encryption.key"
