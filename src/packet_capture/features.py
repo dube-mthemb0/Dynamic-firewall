@@ -275,7 +275,7 @@ class FeatureExtractor:
     
     def _calculate_entropy(self, data: List) -> float:
         """Calculate Shannon entropy of data"""
-        if not data:
+        if data is None or len(data) == 0:
             return 0.0
             
         # Convert to pandas series for value_counts

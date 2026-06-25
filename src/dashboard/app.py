@@ -1,5 +1,6 @@
 """
 Main Dashboard Application using Dash/Plotly
+Dynamic, Real-Time File System Bridged Version
 """
 
 import dash
@@ -9,12 +10,26 @@ import plotly.express as px
 import pandas as pd
 import threading
 import time
+import json
 from datetime import datetime, timedelta
 from typing import Dict, Any, List, Optional
 import logging
+import os
+import yaml
 
-from .components import MetricsPanel, RulesPanel, TrafficPanel, ControlPanel
-from .utils import format_traffic_data, calculate_metrics
+# ==========================================
+# 🛡️ RESILIENT IMPORT ROUTING FRAMEWORK
+# ==========================================
+try:
+    # Standard package import structure (when invoked via main.py)
+    from .components import MetricsPanel, RulesPanel, TrafficPanel, ControlPanel
+    from .utils import format_traffic_data, calculate_metrics
+except (ImportError, ValueError):
+    # Standalone execution fallback path parsing (when invoked via python3 src/dashboard/app.py)
+    import sys
+    sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../')))
+    from src.dashboard.components import MetricsPanel, RulesPanel, TrafficPanel, ControlPanel
+    from src.dashboard.utils import format_traffic_data, calculate_metrics
 
 
 class DashboardApp:
@@ -34,15 +49,19 @@ class DashboardApp:
         # Data storage for real-time updates
         self.traffic_data = []
         self.metrics_history = []
-        self.max_data_points = config.get('dashboard', {}).get('max_data_points', 1000)
+        self.max_data_points = config.get('dashboard', {}).get('max_data_points', 50)
         
-        # Update thread
+        # Live Rate Trackers (For calculating real-time packets per second)
+        self.last_total_packets = 0
+        self.last_check_time = time.time()
+        
+        # Update thread configuration
         self.update_thread = None
         self.is_running = False
         self._lock = threading.Lock()
         
         self.logger = logging.getLogger(__name__)
-    
+        
     def setup_layout(self):
         """Setup the dashboard layout"""
         
@@ -51,29 +70,23 @@ class DashboardApp:
             html.H1("RL Firewall Dashboard", className="dashboard-title"),
             html.Div([
                 html.Span("Status: ", className="status-label"),
-                html.Span("Running", id="system-status", className="status-running"),
+                html.Span("Offline", id="system-status", className="status-stopped"),
                 html.Span(" | Last Update: ", className="status-label"),
                 html.Span(datetime.now().strftime("%H:%M:%S"), id="last-update")
             ], className="status-bar")
         ], className="dashboard-header")
         
-        # Control panel
+        # Build layout components
         control_panel = ControlPanel().create_layout()
-        
-        # Metrics panel
         metrics_panel = MetricsPanel().create_layout()
-        
-        # Traffic visualization
         traffic_panel = TrafficPanel().create_layout()
-        
-        # Rules management
         rules_panel = RulesPanel().create_layout()
         
-        # Main layout
+        # Main layout structure
         self.app.layout = html.Div([
             dcc.Interval(
                 id='interval-component',
-                interval=2000,  # Update every 2 seconds
+                interval=2000,  # Query the shared json stats file every 2 seconds
                 n_intervals=0
             ),
             
@@ -115,36 +128,44 @@ class DashboardApp:
         ], [Input('interval-component', 'n_intervals')])
         def update_dashboard(n):
             try:
-                # Get system status
+                current_time = datetime.now().strftime("%H:%M:%S")
+                stats_file = "logs/dashboard_stats.json"
+                
+                # Auto-detect system status based on file activity
+                is_active = False
+                if os.path.exists(stats_file):
+                    file_mod_time = os.path.getmtime(stats_file)
+                    # If the stats file was modified within the last 6 seconds, the backend is running
+                    if (time.time() - file_mod_time) < 6.0:
+                        is_active = True
+                
+                self.is_running = is_active
                 status_text = "Running" if self.is_running else "Stopped"
                 status_class = "status-running" if self.is_running else "status-stopped"
                 
-                # Get current timestamp
-                current_time = datetime.now().strftime("%H:%M:%S")
-                
-                # Get metrics
+                # Fetch actual live stats data metrics
                 metrics = self.get_current_metrics()
                 
-                # Update charts
-                traffic_fig = self.create_traffic_chart()
+                # Dynamically construct charts using true values
+                traffic_fig = self.create_traffic_chart(metrics['raw_processed'])
                 protocol_fig = self.create_protocol_chart()
                 action_fig = self.create_action_chart()
                 
-                # Get rules data
+                # Fetch explicit firewall configuration rules data
                 rules_data = self.get_rules_data()
                 
                 return (
                     status_text, status_class, current_time,
-                    metrics['packets_processed'], metrics['packets_allowed'], 
-                    metrics['packets_blocked'], metrics['cpu_usage'], 
+                    str(metrics['packets_processed']), str(metrics['packets_allowed']), 
+                    str(metrics['packets_blocked']), metrics['cpu_usage'], 
                     metrics['memory_usage'], traffic_fig, protocol_fig, 
                     action_fig, rules_data
                 )
                 
             except Exception as e:
-                self.logger.error(f"Error updating dashboard: {e}")
+                self.logger.error(f"Error updating dashboard layout view: {e}")
                 return (
-                    "Error", "status-error", current_time,
+                    "Error", "status-error", datetime.now().strftime("%H:%M:%S"),
                     "0", "0", "0", "0%", "0%", 
                     {}, {}, {}, []
                 )
@@ -167,13 +188,13 @@ class DashboardApp:
             try:
                 if button_id == 'start-button' and start_clicks:
                     self.start_capture()
-                    return "System started successfully"
+                    return "System start flag triggered"
                 elif button_id == 'stop-button' and stop_clicks:
                     self.stop_capture()
-                    return "System stopped"
+                    return "System stop flag triggered"
                 elif button_id == 'reset-button' and reset_clicks:
                     self.reset_system()
-                    return "System reset"
+                    return "Dashboard metric charts cleared"
                     
             except Exception as e:
                 return f"Error: {e}"
@@ -203,17 +224,15 @@ class DashboardApp:
                 if button_id == 'add-rule-button' and add_clicks:
                     if not rule_name:
                         return "Error: Rule name is required"
-                    
                     success = self.add_rule(rule_name, src_ip, dst_ip, action)
-                    return "Rule added successfully" if success else "Error adding rule"
+                    return "Rule added successfully" if success else "Error writing rule to pipeline"
                     
                 elif button_id == 'delete-rule-button' and delete_clicks:
                     if not selected_rows or not rules_data:
-                        return "Error: Please select a rule to delete"
-                    
+                        return "Error: Please select a rule row to delete"
                     rule_id = rules_data[selected_rows[0]]['id']
                     success = self.delete_rule(rule_id)
-                    return "Rule deleted successfully" if success else "Error deleting rule"
+                    return "Rule deleted successfully" if success else "Error removing rule from pipeline"
                     
             except Exception as e:
                 return f"Error: {e}"
@@ -221,241 +240,283 @@ class DashboardApp:
             return ""
     
     def get_current_metrics(self) -> Dict[str, Any]:
-        """Get current system metrics"""
+        """Parse core firewall statistics from cross-process metrics bridge"""
         default_metrics = {
-            'packets_processed': 0,
-            'packets_allowed': 0,
-            'packets_blocked': 0,
-            'cpu_usage': '0%',
-            'memory_usage': '0%'
+            'packets_processed': 0, 'packets_allowed': 0, 'packets_blocked': 0,
+            'cpu_usage': '0%', 'memory_usage': '0%', 'raw_processed': 0
         }
         
+        cpu_str, mem_str = '4%', '12%'
         try:
-            if self.policy_engine:
-                stats = self.policy_engine.get_statistics()
-                engine_stats = stats.get('engine_stats', {})
-                enforcement_stats = stats.get('enforcement_stats', {})
-                
-                return {
-                    'packets_processed': engine_stats.get('packets_processed', 0),
-                    'packets_allowed': enforcement_stats.get('action_counts', {}).get('ALLOW', 0),
-                    'packets_blocked': enforcement_stats.get('action_counts', {}).get('DROP', 0),
-                    'cpu_usage': '15%',  # Placeholder - would integrate with system monitoring
-                    'memory_usage': '23%'  # Placeholder
-                }
+            import psutil
+            cpu_str = f"{int(psutil.cpu_percent())}%"
+            mem_str = f"{int(psutil.virtual_memory().percent)}%"
+        except ImportError:
+            pass
             
+        try:
+            stats_file = "logs/dashboard_stats.json"
+            if os.path.exists(stats_file):
+                with open(stats_file, 'r') as f:
+                    live_stats = json.load(f)
+                    
+                return {
+                    'packets_processed': live_stats.get('packets_processed', 0),
+                    'packets_allowed': live_stats.get('packets_allowed', 0),
+                    'packets_blocked': live_stats.get('packets_blocked', 0),
+                    'cpu_usage': cpu_str,
+                    'memory_usage': mem_str,
+                    'raw_processed': live_stats.get('packets_processed', 0)
+                }
         except Exception as e:
-            self.logger.error(f"Error getting metrics: {e}")
-        
+            self.logger.error(f"Error extracting stats file bridge info: {e}")
+            
+        default_metrics['cpu_usage'] = cpu_str
+        default_metrics['memory_usage'] = mem_str
         return default_metrics
     
-    def create_traffic_chart(self) -> Dict[str, Any]:
-        """Create real-time traffic chart"""
+    def create_traffic_chart(self, current_total_packets: int) -> Dict[str, Any]:
+        """Calculate and update line chart vectors with live Packets Per Second rate"""
         try:
-            # Generate sample data for demonstration
+            now = datetime.now()
+            now_ts = time.time()
+            
+            time_delta = now_ts - self.last_check_time
+            if time_delta <= 0:
+                time_delta = 2.0
+                
+            packet_delta = current_total_packets - self.last_total_packets
+            if packet_delta < 0:
+                packet_delta = 0
+                
+            pps = int(packet_delta / time_delta)
+            
+            self.last_total_packets = current_total_packets
+            self.last_check_time = now_ts
+            
             with self._lock:
                 if len(self.traffic_data) == 0:
-                    # Initialize with sample data
-                    now = datetime.now()
-                    for i in range(50):
+                    for i in range(30):
                         self.traffic_data.append({
-                            'timestamp': now - timedelta(seconds=50-i),
-                            'packets_per_second': 10 + (i % 20),
-                            'bytes_per_second': 1000 + (i % 5000)
+                            'timestamp': now - timedelta(seconds=(30-i)*2),
+                            'packets_per_second': 0
                         })
                 
-                df = pd.DataFrame(self.traffic_data[-50:])  # Last 50 points
-            
-            fig = px.line(df, x='timestamp', y='packets_per_second', 
-                         title='Real-time Traffic (Packets/sec)')
-            fig.update_layout(
-                xaxis_title="Time",
-                yaxis_title="Packets/sec",
-                height=300,
-                margin=dict(l=20, r=20, t=40, b=20)
-            )
-            
-            return fig
-            
-        except Exception as e:
-            self.logger.error(f"Error creating traffic chart: {e}")
-            return {}
-    
-    def create_protocol_chart(self) -> Dict[str, Any]:
-        """Create protocol distribution chart"""
-        try:
-            # Sample protocol data
-            protocols = ['TCP', 'UDP', 'ICMP', 'HTTP', 'HTTPS']
-            counts = [45, 30, 10, 8, 7]
-            
-            fig = px.pie(values=counts, names=protocols, title='Protocol Distribution')
-            fig.update_layout(height=300, margin=dict(l=20, r=20, t=40, b=20))
-            
-            return fig
-            
-        except Exception as e:
-            self.logger.error(f"Error creating protocol chart: {e}")
-            return {}
-    
-    def create_action_chart(self) -> Dict[str, Any]:
-        """Create firewall actions chart"""
-        try:
-            actions = ['ALLOW', 'DROP', 'LOG', 'QUARANTINE']
-            counts = [70, 20, 8, 2]
-            colors = ['green', 'red', 'orange', 'purple']
-            
-            fig = px.bar(x=actions, y=counts, color=actions, 
-                        color_discrete_sequence=colors,
-                        title='Firewall Actions')
-            fig.update_layout(
-                xaxis_title="Action",
-                yaxis_title="Count",
-                height=300,
-                margin=dict(l=20, r=20, t=40, b=20),
-                showlegend=False
-            )
-            
-            return fig
-            
-        except Exception as e:
-            self.logger.error(f"Error creating action chart: {e}")
-            return {}
-    
-    def get_rules_data(self) -> List[Dict[str, Any]]:
-        """Get rules data for table"""
-        try:
-            if self.policy_engine:
-                rules = self.policy_engine.list_rules()
-                return [
-                    {
-                        'id': rule.id,
-                        'name': rule.name,
-                        'action': rule.action.value,
-                        'priority': rule.priority,
-                        'enabled': rule.enabled,
-                        'hit_count': rule.hit_count
-                    }
-                    for rule in rules
-                ]
-            
-        except Exception as e:
-            self.logger.error(f"Error getting rules data: {e}")
-        
-        return []
-    
-    def start_capture(self) -> bool:
-        """Start packet capture and processing"""
-        try:
-            if self.packet_capture:
-                self.packet_capture.start()
-            
-            if self.policy_engine:
-                self.policy_engine.start()
-            
-            self.is_running = True
-            self.logger.info("Dashboard: Started capture")
-            return True
-            
-        except Exception as e:
-            self.logger.error(f"Error starting capture: {e}")
-            return False
-    
-    def stop_capture(self) -> bool:
-        """Stop packet capture and processing"""
-        try:
-            if self.packet_capture:
-                self.packet_capture.stop()
-            
-            if self.policy_engine:
-                self.policy_engine.stop()
-            
-            self.is_running = False
-            self.logger.info("Dashboard: Stopped capture")
-            return True
-            
-        except Exception as e:
-            self.logger.error(f"Error stopping capture: {e}")
-            return False
-    
-    def reset_system(self) -> bool:
-        """Reset system statistics and state"""
-        try:
-            with self._lock:
-                self.traffic_data.clear()
-                self.metrics_history.clear()
-            
-            self.logger.info("Dashboard: Reset system")
-            return True
-            
-        except Exception as e:
-            self.logger.error(f"Error resetting system: {e}")
-            return False
-    
-    def add_rule(self, name: str, src_ip: str, dst_ip: str, action: str) -> bool:
-        """Add a new firewall rule"""
-        try:
-            if not self.policy_engine:
-                return False
-            
-            from ..policy_engine.rules import Rule, RuleCondition, RuleAction
-            
-            # Create rule condition
-            condition = RuleCondition(
-                src_ip=src_ip if src_ip else None,
-                dst_ip=dst_ip if dst_ip else None
-            )
-            
-            # Create rule
-            rule_data = {
-                'id': f'manual_{int(time.time())}',
-                'name': name,
-                'condition': condition.__dict__,
-                'action': action.upper(),
-                'priority': 100,
-                'enabled': True,
-                'created_by': 'dashboard',
-                'description': f'Rule created via dashboard: {name}'
-            }
-            
-            self.policy_engine.add_manual_rule(rule_data)
-            return True
-            
-        except Exception as e:
-            self.logger.error(f"Error adding rule: {e}")
-            return False
-    
-    def delete_rule(self, rule_id: str) -> bool:
-        """Delete a firewall rule"""
-        try:
-            if not self.policy_engine:
-                return False
-            
-            return self.policy_engine.remove_rule(rule_id)
-            
-        except Exception as e:
-            self.logger.error(f"Error deleting rule: {e}")
-            return False
-    
-    def run(self, host: str = '127.0.0.1', port: int = 8050, debug: bool = False):
-        """Run the dashboard server"""
-        self.logger.info(f"Starting dashboard server on {host}:{port}")
-        self.app.run_server(host=host, port=port, debug=debug)
-    
-    def update_traffic_data(self, packet_info: Dict[str, Any]):
-        """Update traffic data with new packet"""
-        try:
-            with self._lock:
-                self.traffic_data.append({
-                    'timestamp': datetime.now(),
-                    'src_ip': packet_info.get('src_ip'),
-                    'dst_ip': packet_info.get('dst_ip'),
-                    'protocol': packet_info.get('protocol'),
-                    'size': packet_info.get('packet_size', 0)
-                })
+                if current_total_packets > 0 or len(self.traffic_data) > 0:
+                    self.traffic_data.append({
+                        'timestamp': now,
+                        'packets_per_second': pps
+                    })
                 
-                # Keep only recent data
                 if len(self.traffic_data) > self.max_data_points:
                     self.traffic_data = self.traffic_data[-self.max_data_points:]
                     
+                df = pd.DataFrame(self.traffic_data)
+            
+            fig = px.line(df, x='timestamp', y='packets_per_second', 
+                          title='Real-time Throughput (Packets/sec)')
+            fig.update_layout(
+                xaxis_title="Time", yaxis_title="PPS Rate", height=300,
+                margin=dict(l=20, r=20, t=40, b=20),
+                template="plotly_dark"
+            )
+            return fig
+            
         except Exception as e:
-            self.logger.error(f"Error updating traffic data: {e}")
+            self.logger.error(f"Error creating live traffic chart: {e}")
+            return {}
+    
+    def create_protocol_chart(self) -> Dict[str, Any]:
+        """Create protocol distribution chart directly parsing live metrics"""
+        try:
+            protocols = ['TCP', 'UDP', 'ICMP', 'HTTP', 'HTTPS']
+            counts = [0, 0, 0, 0, 0]
+            
+            stats_file = "logs/dashboard_stats.json"
+            if os.path.exists(stats_file):
+                with open(stats_file, 'r') as f:
+                    live_stats = json.load(f)
+                proto_data = live_stats.get('protocols', {})
+                counts = [proto_data.get(p, 0) for p in protocols]
+            
+            if sum(counts) == 0:
+                counts = [1, 0, 0, 0, 0]
+                protocols = ['No Traffic Captured Yet', '', '', '', '']
+                
+            fig = px.pie(values=counts, names=protocols, title='Live Protocol Distribution')
+            fig.update_layout(height=300, margin=dict(l=20, r=20, t=40, b=20), template="plotly_dark")
+            return fig
+            
+        except Exception as e:
+            self.logger.error(f"Error creating protocol matrix visualization: {e}")
+            return {}
+    
+    def create_action_chart(self) -> Dict[str, Any]:
+        """Create firewall actions chart directly parsing live metrics"""
+        try:
+            actions = ['ALLOW', 'DROP', 'LOG', 'QUARANTINE']
+            counts = [0, 0, 0, 0]
+            colors = ['green', 'red', 'orange', 'purple']
+            
+            stats_file = "logs/dashboard_stats.json"
+            if os.path.exists(stats_file):
+                with open(stats_file, 'r') as f:
+                    live_stats = json.load(f)
+                action_data = live_stats.get('action_counts', {})
+                counts = [action_data.get(a, 0) for a in actions]
+            
+            fig = px.bar(x=actions, y=counts, color=actions, 
+                        color_discrete_sequence=colors,
+                        title='Real-time Agent Decisions')
+            fig.update_layout(
+                xaxis_title="Action Type", yaxis_title="Total Packets", height=300,
+                margin=dict(l=20, r=20, t=40, b=20), showlegend=False,
+                template="plotly_dark"
+            )
+            return fig
+            
+        except Exception as e:
+            self.logger.error(f"Error creating engine action chart metrics: {e}")
+            return {}
+    
+    def get_rules_data(self) -> List[Dict[str, Any]]:
+        """Get rules data directly from the shared cross-process JSON bridge"""
+        try:
+            stats_file = "logs/dashboard_stats.json"
+            if os.path.exists(stats_file):
+                with open(stats_file, 'r') as f:
+                    live_stats = json.load(f)
+                
+                rules_list = live_stats.get('rules', [])
+                return [
+                    {
+                        'id': rule.get('id'),
+                        'name': rule.get('name'),
+                        'action': rule.get('action'),
+                        'priority': rule.get('priority', 100),
+                        'enabled': rule.get('enabled', True),
+                        'hit_count': rule.get('hit_count', 0)
+                    } for rule in rules_list
+                ]
+        except Exception as e:
+            self.logger.error(f"Dashboard rules view syncing error: {e}")
+        return []
+    
+    def start_capture(self) -> bool:
+        """Start packet capture interface"""
+        if self.packet_capture:
+            self.packet_capture.start()
+            self.is_running = True
+            return True
+        return False
+    
+    def stop_capture(self) -> bool:
+        """Stop packet capture interface"""
+        if self.packet_capture:
+            self.packet_capture.stop()
+            self.is_running = False
+            return True
+        return False
+    
+    def reset_system(self) -> bool:
+        """Reset internal memory visualization records"""
+        with self._lock:
+            self.traffic_data.clear()
+            self.metrics_history.clear()
+        return True
+    
+    def add_rule(self, name: str, src_ip: str, dst_ip: str, action: str) -> bool:
+        """Inject a manual firewall rule into the shared JSON file bridge"""
+        try:
+            stats_file = "logs/dashboard_stats.json"
+            if os.path.exists(stats_file):
+                with self._lock:
+                    with open(stats_file, 'r') as f:
+                        live_stats = json.load(f)
+                    
+                    if 'rules' not in live_stats:
+                        live_stats['rules'] = []
+                        
+                    new_rule = {
+                        'id': f"manual_{int(time.time())}",
+                        'name': name,
+                        'src_ip': src_ip if src_ip else "*",
+                        'dst_ip': dst_ip if dst_ip else "*",
+                        'action': action.upper(),
+                        'priority': 50,
+                        'enabled': True,
+                        'hit_count': 0
+                    }
+                    
+                    live_stats['rules'].append(new_rule)
+                    
+                    tmp_file = stats_file + ".tmp"
+                    with open(tmp_file, 'w') as f:
+                        json.dump(live_stats, f)
+                    os.replace(tmp_file, stats_file)
+                return True
+        except Exception as e:
+            self.logger.error(f"Error adding manual UI rule to bridge: {e}")
+        return False
+    
+    def delete_rule(self, rule_id: str) -> bool:
+        """Remove a manual firewall rule from the shared JSON file bridge"""
+        try:
+            stats_file = "logs/dashboard_stats.json"
+            if os.path.exists(stats_file):
+                with self._lock:
+                    with open(stats_file, 'r') as f:
+                        live_stats = json.load(f)
+                    
+                    if 'rules' in live_stats:
+                        live_stats['rules'] = [r for r in live_stats['rules'] if r.get('id') != rule_id]
+                        
+                        tmp_file = stats_file + ".tmp"
+                        with open(tmp_file, 'w') as f:
+                            json.dump(live_stats, f)
+                        os.replace(tmp_file, stats_file)
+                return True
+        except Exception as e:
+            self.logger.error(f"Error deleting UI rule from bridge: {e}")
+        return False
+    
+    def run(self, host: str = '127.0.0.1', port: int = 8050, debug: bool = False):
+        """Run the user-space visualization server"""
+        self.logger.info(f"Starting live monitoring matrix interface on {host}:{port}")
+        self.app.run(host=host, port=port, debug=debug)
+    
+    def update_traffic_data(self, packet_info: Dict[str, Any]):
+        """Callback placeholder logic"""
+        pass
+
+
+# ==========================================
+# 🛠️ FACTORY BRIDGE FOR MAIN.PY INTEGRATION
+# ==========================================
+def create_dashboard_app(config: Dict[str, Any]):
+    """App generation instantiation binding point required by main.py."""
+    wrapper = DashboardApp(config)
+    return wrapper.app
+
+
+# ==========================================
+# 🚀 STANDALONE RUNNER FOR README COMPLIANCE
+# ==========================================
+if __name__ == "__main__":
+    config_file = "config/config.yaml"
+    if not os.path.exists(config_file) and os.path.exists("../../config/config.yaml"):
+        config_file = "../../config/config.yaml"
+        
+    try:
+        with open(config_file, "r") as f:
+            loaded_config = yaml.safe_load(f)
+    except Exception:
+        loaded_config = {}
+        
+    dashboard_cfg = loaded_config.get('dashboard', {})
+    host_ip = dashboard_cfg.get('host', '127.0.0.1')
+    port_no = dashboard_cfg.get('port', 8050)
+    is_debug = dashboard_cfg.get('debug', False)
+    
+    standalone_app = DashboardApp(loaded_config)
+    standalone_app.run(host=host_ip, port=port_no, debug=is_debug)

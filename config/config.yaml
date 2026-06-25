@@ -44,7 +44,7 @@ rl_agent:
   algorithm: "DQN"  # DQN, PPO, A3C
   
   # Environment settings
-  state_size: 20  # Number of features
+  state_size: 40  # Number of features
   action_space: 4  # ALLOW, DROP, LOG, QUARANTINE
   
   # Training parameters
@@ -152,9 +152,21 @@ evaluation:
   max_false_positive_rate: 0.05
 
 # Logging Configuration
+# Logging Configuration
 logging:
   level: "INFO"
-  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  format: "{time:YYYY-MM-DD HH:mm:ss} - {name} - {level} - {message}"
+  
+  # Log files
+  main_log: "logs/main.log"
+  packet_log: "logs/packets.log" 
+  rl_log: "logs/rl_training.log"
+  policy_log: "logs/policy_changes.log"
+  
+  # Log rotation
+  max_size: "10MB"
+  backup_count: 5
+
   
   # Log files
   main_log: "logs/main.log"

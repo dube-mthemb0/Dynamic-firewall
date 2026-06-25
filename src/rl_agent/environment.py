@@ -1,10 +1,10 @@
 """
 Firewall RL Environment
-Custom OpenAI Gym environment for training reinforcement learning agents on firewall decisions
+Custom Gymnasium environment for training reinforcement learning agents on firewall decisions
 """
 
-import gym
-from gym import spaces
+import gymnasium as gym
+from gymnasium import spaces
 import numpy as np
 from typing import Dict, Tuple, List, Optional, Any
 from dataclasses import dataclass
@@ -76,43 +76,40 @@ class TrafficSimulator:
         timestamp = time.time()
         
         if attack_type == "port_scan":
-            # Port scanning: many connections to different ports
             return PacketInfo(
                 timestamp=timestamp,
-                src_ip=f"10.0.1.{random.randint(1, 10)}",  # Scanning source
+                src_ip=f"10.0.1.{random.randint(1, 10)}",
                 dst_ip=f"192.168.1.{random.randint(1, 254)}",
                 src_port=random.randint(32768, 65535),
-                dst_port=random.randint(1, 65535),  # Random target ports
+                dst_port=random.randint(1, 65535),
                 protocol="TCP",
-                packet_size=random.randint(40, 80),  # Small packets
-                flags="SYN",  # Scan signature
+                packet_size=random.randint(40, 80),
+                flags="SYN",
                 flow_id=f"scan_flow_{self.packet_counter}",
                 is_inbound=True
             )
             
         elif attack_type == "ddos":
-            # DDoS: high volume from multiple sources to same target
             return PacketInfo(
                 timestamp=timestamp,
-                src_ip=f"10.0.{random.randint(1, 255)}.{random.randint(1, 255)}",  # Many sources
-                dst_ip="192.168.1.100",  # Same target
+                src_ip=f"10.0.{random.randint(1, 255)}.{random.randint(1, 255)}",
+                dst_ip="192.168.1.100",
                 src_port=random.randint(1024, 65535),
-                dst_port=80,  # Target web service
+                dst_port=80,
                 protocol="TCP",
-                packet_size=random.randint(1000, 1500),  # Larger packets
+                packet_size=random.randint(1000, 1500),
                 flags="SYN,ACK",
                 flow_id=f"ddos_flow_{self.packet_counter}",
                 is_inbound=True
             )
             
         elif attack_type == "brute_force":
-            # Brute force: repeated login attempts
             return PacketInfo(
                 timestamp=timestamp,
                 src_ip=f"10.0.2.{random.randint(1, 50)}",
-                dst_ip="192.168.1.10",  # Target server
+                dst_ip="192.168.1.10",
                 src_port=random.randint(32768, 65535),
-                dst_port=22,  # SSH brute force
+                dst_port=22,
                 protocol="TCP",
                 packet_size=random.randint(100, 300),
                 flags="PSH,ACK",
@@ -120,7 +117,7 @@ class TrafficSimulator:
                 is_inbound=True
             )
             
-        else:  # Generic malicious
+        else:
             return PacketInfo(
                 timestamp=timestamp,
                 src_ip=f"192.168.100.{random.randint(1, 50)}",
@@ -139,18 +136,16 @@ class TrafficSimulator:
         self.packet_counter += 1
         
         if random.random() < self.benign_traffic_ratio:
-            # Generate benign packet
             packet = self.generate_benign_packet()
             return packet, True
         else:
-            # Generate malicious packet
             attack_type = random.choice(self.attack_types)
             packet = self.generate_malicious_packet(attack_type)
             return packet, False
 
 
 class FirewallEnv(gym.Env):
-    """OpenAI Gym environment for firewall policy learning"""
+    """Gymnasium environment for firewall policy learning"""
     
     def __init__(self, config: Dict):
         super(FirewallEnv, self).__init__()
@@ -163,7 +158,6 @@ class FirewallEnv(gym.Env):
         self.max_episode_steps = config.get('max_episode_steps', 1000)
         
         # Action space: 4 possible actions
-        # 0: ALLOW, 1: DROP, 2: LOG, 3: QUARANTINE
         self.action_space = spaces.Discrete(4)
         
         # Observation space: continuous feature vector
@@ -209,11 +203,9 @@ class FirewallEnv(gym.Env):
         flow_id = packet_info.flow_id
         flow = self.flow_tracker[flow_id]
         
-        # Update flow statistics
         flow['packet_count'] += 1
         flow['last_seen'] = packet_info.timestamp
         
-        # Generate realistic flow features
         return {
             'duration': max(packet_info.timestamp - flow.get('start_time', packet_info.timestamp), 0.001),
             'packet_count': flow['packet_count'],
@@ -226,8 +218,6 @@ class FirewallEnv(gym.Env):
     
     def _calculate_reward(self, action: int, is_benign: bool) -> float:
         """Calculate reward based on action and ground truth"""
-        
-        # Base rewards
         correct_allow = self.reward_config.get('correct_allow', 1.0)
         correct_block = self.reward_config.get('correct_block', 1.0)
         false_positive = self.reward_config.get('false_positive', -2.0)
@@ -248,13 +238,11 @@ class FirewallEnv(gym.Env):
                 self.performance_metrics['true_positives'] += 1
                 return correct_block
         elif action == 2:  # LOG
-            # LOG is neutral - allows packet but logs suspicious activity
             if is_benign:
-                return correct_allow * 0.5  # Slight penalty for unnecessary logging
+                return correct_allow * 0.5
             else:
-                return false_negative * 0.5  # Better than allow, worse than drop
+                return false_negative * 0.5
         else:  # QUARANTINE (action == 3)
-            # QUARANTINE is like DROP but less severe
             if is_benign:
                 self.performance_metrics['false_positives'] += 1
                 return false_positive * 0.7
@@ -267,7 +255,6 @@ class FirewallEnv(gym.Env):
         if self.current_features is None:
             return np.zeros(self.state_size, dtype=np.float32)
         
-        # Pad or truncate to match expected state size
         features = self.current_features.features
         if len(features) > self.state_size:
             features = features[:self.state_size]
@@ -276,8 +263,10 @@ class FirewallEnv(gym.Env):
         
         return features.astype(np.float32)
     
-    def reset(self) -> np.ndarray:
-        """Reset environment to initial state"""
+    def reset(self, seed: Optional[int] = None, options: Optional[Dict] = None) -> Tuple[np.ndarray, Dict[str, Any]]:
+        """Reset environment to initial state (Gymnasium compliance)"""
+        super().reset(seed=seed)
+        
         self.current_step = 0
         self.episode_reward = 0
         
@@ -293,10 +282,11 @@ class FirewallEnv(gym.Env):
         
         self.performance_metrics['total_packets'] = 1
         
-        return self._get_state()
+        # Return state and an empty info dictionary
+        return self._get_state(), {}
     
-    def step(self, action: int) -> Tuple[np.ndarray, float, bool, Dict]:
-        """Execute one step in the environment"""
+    def step(self, action: int) -> Tuple[np.ndarray, float, bool, bool, Dict]:
+        """Execute one step in the environment (Gymnasium compliance)"""
         
         # Calculate reward for current action
         reward = self._calculate_reward(action, self.current_label)
@@ -311,21 +301,20 @@ class FirewallEnv(gym.Env):
         # Move to next step
         self.current_step += 1
         
-        # Check if episode is done
-        done = self.current_step >= self.max_episode_steps
+        # Gymnasium parameters: separated termination vs truncation
+        terminated = False
+        truncated = self.current_step >= self.max_episode_steps
         
-        # Generate next packet if not done
-        if not done:
+        # Generate next packet if the run isn't over
+        if not (terminated or truncated):
             self.current_packet, self.current_label = self.traffic_simulator.generate_packet()
             flow_features = self._get_flow_features(self.current_packet)
             self.current_features = self.feature_extractor.extract_features(self.current_packet, flow_features)
             self.current_features = self.feature_extractor.normalize_features(self.current_features)
             self.performance_metrics['total_packets'] += 1
         
-        # Get next state
         next_state = self._get_state()
         
-        # Info dict for debugging
         info = {
             'packet_info': {
                 'src_ip': self.current_packet.src_ip if self.current_packet else None,
@@ -339,7 +328,7 @@ class FirewallEnv(gym.Env):
             'performance': self._get_performance_metrics()
         }
         
-        return next_state, reward, done, info
+        return next_state, reward, terminated, truncated, info
     
     def _get_performance_metrics(self) -> Dict:
         """Calculate current performance metrics"""
@@ -361,30 +350,21 @@ class FirewallEnv(gym.Env):
         
         return metrics
     
-    def render(self, mode='human') -> Optional[str]:
-        """Render the environment"""
-        if mode == 'human':
-            metrics = self._get_performance_metrics()
-            print(f"\nFirewall Environment Status:")
-            print(f"Step: {self.current_step}/{self.max_episode_steps}")
-            print(f"Episode Reward: {self.episode_reward:.2f}")
-            print(f"Accuracy: {metrics['accuracy']:.3f}")
-            print(f"Precision: {metrics['precision']:.3f}")
-            print(f"Recall: {metrics['recall']:.3f}")
-            print(f"F1 Score: {metrics['f1_score']:.3f}")
-            print(f"False Positive Rate: {metrics['false_positive_rate']:.3f}")
-            print(f"False Negative Rate: {metrics['false_negative_rate']:.3f}")
-            
-            if self.current_packet:
-                print(f"\nCurrent Packet:")
-                print(f"  {self.current_packet.src_ip}:{self.current_packet.src_port} -> "
-                      f"{self.current_packet.dst_ip}:{self.current_packet.dst_port}")
-                print(f"  Protocol: {self.current_packet.protocol}, Size: {self.current_packet.packet_size}")
-                print(f"  Label: {'Benign' if self.current_label else 'Malicious'}")
-                
-        elif mode == 'rgb_array':
-            # Could implement visualization here
-            return None
+    def render(self) -> Optional[str]:
+        """Render the environment metrics status"""
+        metrics = self._get_performance_metrics()
+        print(f"\nFirewall Environment Status:")
+        print(f"Step: {self.current_step}/{self.max_episode_steps}")
+        print(f"Episode Reward: {self.episode_reward:.2f}")
+        print(f"Accuracy: {metrics['accuracy']:.3f}")
+        print(f"Precision: {metrics['precision']:.3f}")
+        print(f"Recall: {metrics['recall']:.3f}")
+        print(f"F1 Score: {metrics['f1_score']:.3f}")
+        
+        if self.current_packet:
+            print(f"\nCurrent Packet:")
+            print(f"  {self.current_packet.src_ip}:{self.current_packet.src_port} -> {self.current_packet.dst_ip}:{self.current_packet.dst_port}")
+            print(f"  Label: {'Benign' if self.current_label else 'Malicious'}")
     
     def close(self):
         """Clean up resources"""
@@ -414,44 +394,31 @@ def main():
             'correct_block': 1.0,
             'false_positive': -2.0,
             'false_negative': -5.0
-        },
-        # Feature extraction config
-        'extract_ip': True,
-        'extract_ports': True,
-        'extract_protocol': True,
-        'extract_packet_size': True,
-        'extract_flags': True,
-        'extract_flow_duration': True,
-        'extract_bytes_transferred': True,
-        'extract_packet_count': True,
-        'extract_packet_rate': True,
-        'extract_byte_rate': True
+        }
     }
     
-    # Create environment
     env = make_firewall_env(config)
     
-    # Run a simple episode
-    state = env.reset()
+    # Gymnasium unpacking compatibility check
+    state, info = env.reset()
     done = False
     step = 0
     
     logger.info("Starting firewall environment test...")
     
-    while not done and step < 20:  # Limit for demo
-        # Random action for testing
+    while not done and step < 20:
         action = env.action_space.sample()
         
-        # Take step
-        next_state, reward, done, info = env.step(action)
+        # Unpack the 5 parameters returned by gymnasium envs
+        next_state, reward, terminated, truncated, info = env.step(action)
+        done = terminated or truncated
         
         logger.info(f"Step {step}: Action={env.get_action_meanings()[action]}, "
-                   f"Reward={reward:.2f}, Benign={info['packet_info']['is_benign']}")
+                    f"Reward={reward:.2f}, Benign={info['packet_info']['is_benign']}")
         
         state = next_state
         step += 1
     
-    # Final performance
     env.render()
     env.close()
 

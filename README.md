@@ -1,8 +1,5 @@
 # Dynamic Reinforcement Learning Firewall
 
-## 🔒 Project Overview
-A dynamic firewall system that uses reinforcement learning to adaptively block or allow network traffic based on learned patterns, providing superior protection compared to traditional rule-based firewalls.
-
 ## 🧠 Key Features
 - **Real-time Packet Capture**: Uses Scapy for high-performance network monitoring
 - **RL-based Policy Learning**: DQN/PPO agents that learn optimal firewall policies
@@ -14,9 +11,7 @@ A dynamic firewall system that uses reinforcement learning to adaptively block o
 ## 🏗️ Architecture
 
 ```
-Network Traffic → Packet Capture → Feature Extraction → RL Agent → Policy Engine → Firewall Rules
-                                                           ↓
-                           Dashboard ← Logging System ← Evaluation Module
+![alt text](image.png)
 ```
 
 ## 📁 Project Structure
@@ -47,33 +42,28 @@ RL_Firewall/
 ```bash
 # Clone repository
 git clone <repository-url>
-cd RL_Firewall
+cd Dynamic-firewall
 
 # Create virtual environment
-python3 -m venv venv
-source venv/bin/activate
+python3 -m venv .venv
+source .venv/bin/activate
 
 # Install dependencies
 pip install -r requirements.txt
 
-# Setup configuration
-cp config/config.example.yaml config/config.yaml
-# Edit config.yaml with your settings
-```
-
 ### Basic Usage
 ```bash
 # Start packet capture (requires root)
-sudo python src/main.py --mode capture
+sudo python3 main.py --mode capture
 
 # Train RL model
-python src/main.py --mode train --dataset data/cicids2017
+python3 main.py --mode train --dataset data/cicids2017
 
 # Run live firewall
-sudo python src/main.py --mode firewall
+sudo python3 main.py --mode firewall
 
 # Launch dashboard
-python src/dashboard/app.py
+python3 src/dashboard/app.py
 ```
 
 ## 🧪 Testing Environment
@@ -103,16 +93,5 @@ Initial testing shows:
 - 78% reduction in false positives
 - Superior adaptability to zero-day attacks
 
-## 🤝 Contributing
-1. Fork the repository
-2. Create feature branch
-3. Implement changes with tests
-4. Submit pull request
-
-## 📝 License
-MIT License - see LICENSE file for details
-
-## 📚 References
-- [Deep Q-Learning for Network Security](https://example.com)
+##  References
 - [CICIDS2017 Dataset](https://www.unb.ca/cic/datasets/ids-2017.html)
-- [Stable Baselines3 Documentation](https://stable-baselines3.readthedocs.io/)

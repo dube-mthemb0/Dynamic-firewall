@@ -273,7 +273,7 @@ class FirewallAgent:
             raise
     
     def evaluate(self, n_episodes: int = 100) -> Dict:
-        """Evaluate the trained agent"""
+        """Evaluate the trained agent using Gymnasium conventions"""
         if self.model is None:
             if self._model_exists():
                 self.model = self.load_model()
@@ -291,20 +291,29 @@ class FirewallAgent:
         episode_metrics = []
         
         for episode in range(n_episodes):
-            state = eval_env.reset()
+            # Gymnasium compliant unpacking
+            state, info = eval_env.reset()
             episode_reward = 0
             done = False
             step = 0
             
             while not done:
                 action, _ = self.model.predict(state, deterministic=True)
-                state, reward, done, info = eval_env.step(action)
+                
+                # EXTRACT SCALAR INT: Converts unhashable NumPy array to raw int
+                if isinstance(action, np.ndarray):
+                    action = int(action.item())
+                
+                # Gymnasium compliant step parameter unpacking
+                state, reward, terminated, truncated, info = eval_env.step(action)
+                done = terminated or truncated
+                
                 episode_reward += reward
                 step += 1
             
             episode_rewards.append(episode_reward)
             
-            # Extract performance metrics
+            # Extract performance metrics from the final step's info dictionary
             if 'performance' in info:
                 perf = info['performance']
                 episode_accuracies.append(perf.get('accuracy', 0.0))
@@ -345,6 +354,10 @@ class FirewallAgent:
             raise ValueError("No trained model available for prediction")
         
         action, _ = self.model.predict(state, deterministic=True)
+        
+        # EXTRACT SCALAR INT: Keeps list lookups inside main.py happy
+        if isinstance(action, np.ndarray):
+            action = int(action.item())
         
         # Get action probabilities if available
         if hasattr(self.model, 'predict_proba'):
@@ -438,14 +451,10 @@ def main():
         }
     }
     
-    # Create agent
     agent = FirewallAgent(config)
     
     try:
-        # Train the agent
         agent.train()
-        
-        # Evaluate the trained agent
         results = agent.evaluate(n_episodes=50)
         logger.info(f"Final evaluation results: {results}")
         

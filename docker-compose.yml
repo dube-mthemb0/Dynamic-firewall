@@ -1,0 +1,17 @@
+version: '3.8'
+
+services:
+  testing-environment:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: dynamic_firewall_engine
+    privileged: true
+    cap_add:
+      - NET_ADMIN
+    network_mode: "host"
+    volumes:
+      - ./logs:/app/logs
+      - ./models:/app/models
+      - ./config:/app/config
+    restart: unless-stopped
